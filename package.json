@@ -1,6 +1,6 @@
 {
   "name": "tunnel-ssh-mac",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Easy extendable SSH tunnel",
   "main": "index.js",
   "scripts": {},

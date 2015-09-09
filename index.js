@@ -26,6 +26,11 @@ function createConfig(userConfig) {
     if (config.localPort === undefined) {
         config.localPort = config.dstPort;
     }
+    
+    // use to generate random port
+    if (config.localPortFunc && _.isFunction(config.localPortFunc)){
+        config.localPort = config.localPortFunc();
+    }
 
     return config;
 }
@@ -80,7 +85,18 @@ function tunnel(configArgs, callback) {
             sshConnection.on("keyboard-interactive", config["keyboard-interactive"]);
         sshConnection.connect(config);
     });
-    return createListener(server).listen(config.localPort, config.localHost, callback);
+    server.on('error', function (e) {
+        if (e.code == 'EADDRINUSE') {
+            if (config.localPortFunc && _.isFunction(config.localPortFunc)){
+                config.localPort = config.localPortFunc();
+                server.listen(config.localPort, config.localHost, callback);
+                return;
+            }
+        }
+        throw e;
+    });
+    createListener(server).listen(config.localPort, config.localHost, callback);
+    return server;
 }
 
 module.exports = tunnel;
