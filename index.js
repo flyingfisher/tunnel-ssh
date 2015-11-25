@@ -97,21 +97,32 @@ function tunnel(configArgs, callback) {
         return false;
     }
     
-    var callbackWithErrorHandle = function(err){
+    server.on("error", function(err){
         if (err && handleAddressError(err)){
-            server.listen(config.localPort, config.localHost, callbackWithErrorHandle);
+            server.listen(config.localPort, config.localHost, callback);
         } else {
             callback(err);
         }
-    }
+    });
     
     var trySsh = new Connection();
     trySsh.on("error",function(err){
         callback(err);
     });
     trySsh.on('ready', function(){
-        trySsh.end();
-        createListener(server).listen(config.localPort, config.localHost, callbackWithErrorHandle);    
+        trySsh.forwardOut(
+            config.srcHost,
+            config.srcPort,
+            config.dstHost,
+            config.dstPort, function(err, sshStream) {
+                if(err){
+                    callback(err);
+                }else{
+                    createListener(server).listen(config.localPort, config.localHost, callback);    
+                }
+                
+                trySsh.end();
+            })
     });
     trySsh.connect(config);
 
