@@ -93,9 +93,19 @@ function tunnel(configArgs, callback) {
                 return;
             }
         }
-        throw e;
+        callback(e)
     });
-    createListener(server).listen(config.localPort, config.localHost, callback);
+    
+    var trySsh = new Connection();
+    trySsh.on("error",function(err){
+        callback(err);
+    });
+    trySsh.on('ready', function(){
+        trySsh.end();
+        createListener(server).listen(config.localPort, config.localHost);    
+    });
+    trySsh.connect(config);
+
     return server;
 }
 
