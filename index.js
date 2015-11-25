@@ -85,16 +85,25 @@ function tunnel(configArgs, callback) {
             sshConnection.on("keyboard-interactive", config["keyboard-interactive"]);
         sshConnection.connect(config);
     });
-    server.on('error', function (e) {
-        if (e.code == 'EADDRINUSE') {
+    
+    function handleAddressError(err){
+        if (err.code == 'EADDRINUSE') {
             if (config.localPortFunc && _.isFunction(config.localPortFunc)){
                 config.localPort = config.localPortFunc();
-                server.listen(config.localPort, config.localHost, callback);
-                return;
+                return true;
             }
         }
-        callback(e)
-    });
+        
+        return false;
+    }
+    
+    var callbackWithErrorHandle = function(err){
+        if (err && handleAddressError(err)){
+            server.listen(config.localPort, config.localHost, callbackWithErrorHandle);
+        } else {
+            callback(err);
+        }
+    }
     
     var trySsh = new Connection();
     trySsh.on("error",function(err){
@@ -102,7 +111,7 @@ function tunnel(configArgs, callback) {
     });
     trySsh.on('ready', function(){
         trySsh.end();
-        createListener(server).listen(config.localPort, config.localHost);    
+        createListener(server).listen(config.localPort, config.localHost, callbackWithErrorHandle);    
     });
     trySsh.connect(config);
 
