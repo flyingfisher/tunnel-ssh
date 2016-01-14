@@ -35,32 +35,16 @@ function createConfig(userConfig) {
     return config;
 }
 
-function bindSSHConnection(config, server, netConnection) {
-
-    var sshConnection = new Connection();
-    server.emit('sshConnection', sshConnection, netConnection, server);
-    sshConnection.on('ready', function() {
-
-        sshConnection.forwardOut(
-            config.srcHost,
-            config.srcPort,
-            config.dstHost,
-            config.dstPort, function(err, sshStream) {
-                if (err) {
-                    throw err;
-                }
-                sshStream.once('close', function() {
-                    if (!config.keepAlive) {
-                        sshConnection.end();
-                        netConnection.end();
-                        server.close();
-                    }
-                });
-                server.emit('sshStream', sshStream, sshConnection, netConnection, server);
-                netConnection.pipe(sshStream).pipe(netConnection);
-            });
+function bindSSHConnection(connObj, config, server, netConnection) {
+    connObj.sshStream.once('close', function() {
+        if (!config.keepAlive) {
+            connObj.sshConnection.end();
+            netConnection.end();
+            server.close();
+        }
     });
-    return sshConnection;
+    server.emit('sshStream', connObj.sshStream, connObj.sshConnection, netConnection, server);
+    netConnection.pipe(connObj.sshStream).pipe(netConnection);
 }
 
 function createListener(server) {
@@ -76,14 +60,66 @@ function createListener(server) {
     return server;
 }
 
-function tunnel(configArgs, callback) {
+var sshConnectionPool = [];
+function buildSSHConnectionPool(config, size, callback){
+    if (!size){
+        if (callback)
+            callback();
+        return;
+    }
+    
+    _.times(size, function(n){
+        createSSHConnection(config, function(connObj){
+            if (n === (size - 1)){
+                if(callback)
+                    callback();
+            }
+            
+            sshConnectionPool.push(connObj);
+        })
+    })
+}
+
+function createSSHConnection(config, callback){
+    var sshConnection = new Connection();
+        sshConnection.on("error", function(err){
+            throw err;
+        });
+        sshConnection.on('ready', function(){
+            sshConnection.forwardOut(
+                config.srcHost,
+                config.srcPort,
+                config.dstHost,
+                config.dstPort, function(err, sshStream) {
+                    if(err){
+                        throw err;
+                    }
+                    
+                    callback({
+                        sshConnection:sshConnection,
+                        sshStream:sshStream
+                    })
+                })
+        });
+
+        if(config["keyboard-interactive"])
+            sshConnection.on("keyboard-interactive", config["keyboard-interactive"]);
+
+        sshConnection.connect(config);
+}
+
+function tunnel(configArgs, options, callback) {
     var config = createConfig(configArgs);
     var server = net.createServer(function(netConnection) {
         server.emit('netConnection', netConnection, server);
-        var sshConnection = bindSSHConnection(config, server, netConnection);
-        if(config["keyboard-interactive"])
-            sshConnection.on("keyboard-interactive", config["keyboard-interactive"]);
-        sshConnection.connect(config);
+        var connObj = sshConnectionPool.pop();
+        if (!connObj) {
+            createSSHConnection(config, function(connObj){
+                bindSSHConnection(connObj, config, server, netConnection);
+            });
+        } else {
+            bindSSHConnection(connObj, config, server, netConnection);
+        }
     });
     
     function handleAddressError(err){
@@ -105,27 +141,35 @@ function tunnel(configArgs, callback) {
         }
     });
     
-    var trySsh = new Connection();
-    trySsh.on("error",function(err){
-        callback(err);
-    });
-    trySsh.on('ready', function(){
-        trySsh.forwardOut(
-            config.srcHost,
-            config.srcPort,
-            config.dstHost,
-            config.dstPort, function(err, sshStream) {
-                if(err){
-                    callback(err);
-                }else{
-                    createListener(server).listen(config.localPort, config.localHost, callback);    
-                }
+    if(options.try){
+        var trySsh = new Connection();
+        trySsh.on("error",function(err){
+            callback(err);
+        });
+        trySsh.on('ready', function(){
+            trySsh.forwardOut(
+                config.srcHost,
+                config.srcPort,
+                config.dstHost,
+                config.dstPort, function(err, sshStream) {
+                    if(err){
+                        callback(err);
+                    }
+                    
+                    buildSSHConnectionPool(config, options.size, function(){
+                        createListener(server).listen(config.localPort, config.localHost, callback);    
+                    });
                 
-                trySsh.end();
-            })
-    });
-    trySsh.connect(config);
-
+                    trySsh.end();
+                })
+        });
+        trySsh.connect(config);
+    } else {
+        buildSSHConnectionPool(config, options.size, function(){
+            createListener(server).listen(config.localPort, config.localHost, callback);
+        });
+    }
+    
     return server;
 }
 
