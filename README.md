@@ -19,6 +19,7 @@ tunnel(config, options, callback);
 options
    try:boolean // try connection after setup tunnel
    size:number // create how many sshconnection after setup tunnel
+
 ```
 
 Note that, finish args is an array corresponding to prompts array.
